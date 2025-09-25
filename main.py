@@ -10,11 +10,12 @@ TODO:
 @ Add auto file type detection
 @ Refactore code
 @ Make filters more flexible
+@ Add unit tests
 """
 
 import re
 from enum import Enum
-from CMode import Mode
+from libs.CMode import Mode
 
 
 class InputFileType(Enum):
@@ -31,7 +32,7 @@ class FilterType(Enum):
 # комментарии не выравниваются, слава великому RUFF
 SETTINGS = {
     # I/O settings
-    "path": "dump4.txt",  # Path to input file
+    "path": "dumps/dump4.txt",  # Path to input file
     "generate_file": False,  # Generate output file from dump or not
     "output_file": "output.bmp",  # Output file name
     # Analysis settings
