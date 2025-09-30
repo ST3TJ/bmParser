@@ -1,19 +1,18 @@
 """
-version: 1.0.0
-time spent: 3 hrs 42 mins
+version: 1.1.2
+time spent: 4 hrs 31 mins
 
 TODO:
-@ Improve error handling
 @ Improve resolver
+@ Add image dumps ( 00 FF FF, etc.)
 
 @ Add auto mode generation
-@ Add auto file type detection
 @ Refactore code
 @ Make filters more flexible
-@ Add unit tests
 """
 
 import re
+import os
 from enum import Enum
 from libs.CMode import Mode
 
@@ -21,6 +20,7 @@ from libs.CMode import Mode
 class InputFileType(Enum):
     DUMP = "dump"  # .txt file with hex data
     IMAGE = "image"  # .bmp file
+    INVALID = "invalid"  # invalid file type
 
 
 class FilterType(Enum):
@@ -36,10 +36,9 @@ SETTINGS = {
     "generate_file": False,  # Generate output file from dump or not
     "output_file": "output.bmp",  # Output file name
     # Analysis settings
-    "type": InputFileType.DUMP,  # Generation type
+    "type": None,
     "filter": [  # Filters to apply
         FilterType.MAJORITY_ZEROS,
-        # FilterType.UNIFORM,
     ],
 }
 
@@ -54,7 +53,7 @@ CONFIGS = [
 
 
 class MessageResolver:
-    def __init__(self, lsb: list[int] | str):
+    def __init__(self, lsb: list[int]):
         if isinstance(lsb, list):
             self.lsb = "".join(str(b) for b in lsb)
         else:
@@ -89,6 +88,16 @@ class MessageResolver:
             return self._straight()
 
 
+# Refactore this in future
+def get_file_type(path: str) -> InputFileType:
+    if path.endswith(".txt"):
+        return InputFileType.DUMP
+    elif path.endswith(".bmp"):
+        return InputFileType.IMAGE
+    else:
+        return InputFileType.INVALID
+
+
 def parse_dump_data(dump: str) -> list[str]:
     return re.findall(r"[0-9A-Fa-f]{2}", dump)
 
@@ -99,6 +108,36 @@ def little_endian(data: list[str]) -> int:
 
 def concat(data: list[str]) -> str:
     return "".join(chr(int(x, 16)) for x in data)
+
+
+def find_file(path):
+    for root, _, files in os.walk(os.getcwd()):
+        for file in files:
+            if path in file:
+                return os.path.join(root, file)
+    return ""
+
+
+def load_file(path: str, mode: str) -> list[str]:
+    if not os.path.exists(path):
+        valid_path = find_file(path)
+        if not valid_path:
+            raise FileNotFoundError(f"File {path} not found")
+        return load_file(valid_path, mode)
+    else:
+        with open(path, mode) as f:
+            return f.read()
+
+
+def save_file(path: str, data: str) -> None:
+    try:
+        with open(path, "wb") as f:
+            bytes_data = bytes.fromhex("".join(data))
+            f.write(bytes_data)
+    except FileNotFoundError:
+        print(f"File {path} not found")
+    except Exception as e:
+        print(f"Failed to save file {path}: {e}")
 
 
 # Шайтан функция с шайтан математикой
@@ -141,12 +180,11 @@ def analyze(lsb: list[int], mode: Mode) -> str:
     analyze_result = (
         FilterType.UNIFORM.value
         if 0.45 <= ones_ratio <= 0.55
-        else "1 prevails"
+        else FilterType.MAJORITY_ONES.value
         if ones_ratio > 0.55
-        else "0 prevails"
+        else FilterType.MAJORITY_ZEROS.value
     )
 
-    # Это выглядит как костыль ( это он и есть ), но мне лень что-то придумывать
     for filter_type in SETTINGS["filter"]:
         if analyze_result == filter_type.value:
             return ""
@@ -193,11 +231,22 @@ def process_dump_data(data: list[str]) -> None:
 
 class Handle:
     @staticmethod
+    def init():
+        if not SETTINGS["path"]:
+            print("Path to input file is not specified")
+            exit(1)
+
+        file_type = get_file_type(SETTINGS["path"])
+        if file_type == InputFileType.INVALID:
+            print(f"Invalid file type: {SETTINGS['path']}")
+            exit(1)
+
+        SETTINGS["type"] = file_type
+
+    @staticmethod
     def dump(hex_string: list[str] = None):
         if not hex_string:
-            with open(SETTINGS["path"], "r") as f:
-                data = f.read()
-
+            data = load_file(SETTINGS["path"], "r")
             hex_string = parse_dump_data(data)
 
         process_dump_data(hex_string)
@@ -205,28 +254,19 @@ class Handle:
         if not SETTINGS["generate_file"]:
             return
 
-        with open(SETTINGS["output_file"], "wb") as f:
-            bytes_data = bytes.fromhex("".join(hex_string))
-            f.write(bytes_data)
+        save_file(SETTINGS["output_file"], hex_string)
 
     @staticmethod
     def image():
         file_path = SETTINGS["path"]
+        binary_data = load_file(file_path, "rb")
+        hex_string = binary_data.hex(" ").split(" ")
 
-        try:
-            with open(file_path, "rb") as f:
-                binary_data = f.read()
-
-            hex_string = binary_data.hex(" ").split(" ")
-
-            Handle.dump(hex_string)
-        except FileNotFoundError:
-            print(f"Ошибка: Файл '{file_path}' не найден")
-        except Exception as e:
-            print(f"Ошибка при обработке файла: {e}")
+        Handle.dump(hex_string)
 
 
 def main():
+    Handle.init()
     getattr(Handle, SETTINGS["type"].value)()
 
 
